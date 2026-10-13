@@ -403,7 +403,16 @@ mod tests {
 
     #[test]
     fn os_page_size_matches_system() {
+        #[cfg(unix)]
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        #[cfg(windows)]
+        let page_size = {
+            use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
+            let mut info = SYSTEM_INFO::default();
+            // SAFETY: info points to a writable SYSTEM_INFO for the duration of the call.
+            unsafe { GetSystemInfo(&mut info) };
+            info.dwPageSize
+        };
         assert_eq!(OS::BYTES_IN_PAGE, page_size as usize);
     }
 }
