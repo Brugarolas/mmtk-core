@@ -7,13 +7,19 @@ use std::io::Result;
 pub struct MacOS;
 
 impl OSMemory for MacOS {
+    // Apple Silicon uses 16K pages.
+    #[cfg(target_arch = "aarch64")]
+    const LOG_BYTES_IN_PAGE: u8 = 14;
+    #[cfg(not(target_arch = "aarch64"))]
+    const LOG_BYTES_IN_PAGE: u8 = 12;
+
     fn dzmmap(
         start: Address,
         size: usize,
         strategy: MmapStrategy,
-        _annotation: &MmapAnnotation<'_>,
-    ) -> Result<Address> {
-        let addr = unix_common::mmap(start, size, strategy)?;
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address> {
+        let addr = unix_common::mmap(start, size, strategy, annotation)?;
 
         // Annotation is ignored on macOS
         // Huge page is ignored on macOS
@@ -21,6 +27,29 @@ impl OSMemory for MacOS {
         // Zero memory if we actually reserve the memory
         if strategy.reserve {
             crate::util::memory::zero(start, size);
+        }
+        Ok(addr)
+    }
+
+    fn dzmmap_anywhere(
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address> {
+        unix_common::mmap_anywhere(size, align, strategy, annotation)
+    }
+
+    fn dzmmap_preferred(
+        start: Address,
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address> {
+        let addr = unix_common::mmap_preferred(start, size, align, strategy, annotation)?;
+        if strategy.reserve {
+            crate::util::memory::zero(addr, size);
         }
         Ok(addr)
     }
@@ -44,8 +73,11 @@ impl OSMemory for MacOS {
 
 impl MmapStrategy {
     /// get the flags for POSIX mmap.
-    pub fn get_posix_mmap_flags(&self) -> i32 {
-        let mut flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS | libc::MAP_FIXED;
+    pub fn get_posix_mmap_flags(&self, fixed: bool) -> i32 {
+        let mut flags = libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
+        if fixed {
+            flags |= libc::MAP_FIXED;
+        }
         // replace is isgnored on macOS
         if !self.reserve {
             flags |= libc::MAP_NORESERVE;

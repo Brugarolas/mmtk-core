@@ -2,6 +2,13 @@
 
 export RUSTFLAGS="-D warnings -A unknown-lints"
 
+# --- Check line ends of text files ---
+
+if ! $project_root/.github/scripts/ci-check-lineends.sh; then
+    echo "ERROR: Line ends check failed."
+    exit 1
+fi
+
 # --- Check format ---
 cargo fmt -- --check
 cargo fmt --manifest-path=macros/Cargo.toml -- --check
@@ -39,9 +46,9 @@ else
     fi
 
     # mock tests
-    cargo clippy --features mock_test
-    cargo clippy --features mock_test --tests
-    cargo clippy --features mock_test --benches
+    cargo clippy --features mock_test,mock_test_side_metadata
+    cargo clippy --features mock_test,mock_test_side_metadata --tests
+    cargo clippy --features mock_test,mock_test_side_metadata --benches
 
     # non-mock benchmarks
     cargo clippy --features test_private --benches

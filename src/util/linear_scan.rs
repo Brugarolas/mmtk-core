@@ -5,9 +5,9 @@ use crate::vm::ObjectModel;
 use crate::vm::VMBinding;
 use std::marker::PhantomData;
 
-// FIXME: MarkCompact uses linear scanning to discover allocated objects in the MarkCompactSpace.
-// It should use a local metadata (specific to the MarkCompactSpace) for that purpose.
-// In the future, we should let MarkCompact do linear scanning using its local metadata instead.
+// FIXME: Lisp2 uses linear scanning to discover allocated objects in the Lisp2Space.
+// It should use a local metadata (specific to the Lisp2Space) for that purpose.
+// In the future, we should let Lisp2 do linear scanning using its local metadata instead.
 
 /// Iterate over an address range, and find each object by VO bit.
 /// ATOMIC_LOAD_VO_BIT can be set to false if it is known that loading VO bit
@@ -58,14 +58,37 @@ impl<VM: VMBinding, S: LinearScanObjectSize, const ATOMIC_LOAD_VO_BIT: bool> std
             };
 
             if let Some(object) = is_object {
-                self.cursor += S::size(object);
+                // The object size may not be a multiple of `ObjectReference::ALIGNMENT`.
+                let object_end =
+                    (self.cursor + S::size(object)).align_up(ObjectReference::ALIGNMENT);
+                self.move_cursor_to_next_vo_bit(object_end);
                 return Some(object);
             } else {
-                self.cursor += VM::MIN_ALIGNMENT;
+                self.move_cursor_to_next_vo_bit(self.cursor + ObjectReference::ALIGNMENT);
             }
         }
 
         None
+    }
+}
+
+impl<VM: VMBinding, S: LinearScanObjectSize, const ATOMIC_LOAD_VO_BIT: bool>
+    ObjectIterator<VM, S, ATOMIC_LOAD_VO_BIT>
+{
+    /// Move the cursor to the next address with the VO bit set, searching forwards from `from`
+    /// (inclusive). VO bits can only be set at addresses aligned to `ObjectReference::ALIGNMENT`,
+    /// so we search for the next set bit rather than checking every address. If there is no VO
+    /// bit set before `self.end`, the cursor is moved to `self.end`.
+    fn move_cursor_to_next_vo_bit(&mut self, from: Address) {
+        self.cursor = if from < self.end {
+            unsafe {
+                vo_bit::VO_BIT_SIDE_METADATA_SPEC
+                    .find_next_non_zero_value::<u8>(from, self.end - from)
+            }
+            .unwrap_or(self.end)
+        } else {
+            self.end
+        };
     }
 }
 
@@ -125,13 +148,45 @@ pub trait Region: Copy + PartialEq + PartialOrd {
         debug_assert!(self.start().as_usize() < usize::MAX - (n << Self::LOG_BYTES));
         Self::from_aligned_address(self.start() + (n << Self::LOG_BYTES))
     }
-    /// Return the region that contains the object.
-    fn containing(object: ObjectReference) -> Self {
-        Self::from_unaligned_address(object.to_raw_address())
+    /// Get the number of lines between the given two lines.
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        if start.start() > end.start() {
+            return None;
+        }
+        Some((end.start() - start.start()) >> Self::LOG_BYTES)
     }
     /// Check if the given address is in the region.
     fn includes_address(&self, addr: Address) -> bool {
         Self::align(addr) == self.start()
+    }
+}
+
+/// An unstraddlable region.  No object can straddle (i.e. span over, overrlap with) more than one
+/// [`UnstraddlableRegion`].  In other words, any object is either in the region or not in the
+/// region.
+///
+/// For example, in [`crate::policy::immix::ImmixSpace`], a [`crate::policy::immix::block::Block`]
+/// is an unstraddlable region because objects cannot straddle multiple blocks.  In contrast a
+/// [`crate::policy::immix::line::Line`] is not an unstraddlable region because an object can
+/// straddle multiple lines.
+///
+/// Because the raw address of a [`ObjectReference`] must be inside an object, an object is in an
+/// [`UnstraddlableRegion`] if an only if the raw address of its [`ObjectReference`] is in the
+/// [`UnstraddlableRegion`].
+// The doc comment above links to `crate::policy::*` items. The `policy` module itself is private
+// (not re-exported at the crate root), so those items are technically unreachable from outside
+// the crate even though they are declared `pub`. `cargo doc --document-private-items` (used by
+// GC implementers and by `ci-doc.sh`) documents them anyway, so the links do resolve there.
+#[allow(rustdoc::private_intra_doc_links)]
+pub trait UnstraddlableRegion: Region {
+    /// Return the region that contains the object.
+    fn containing(object: ObjectReference) -> Self {
+        Self::from_unaligned_address(object.to_raw_address())
+    }
+
+    /// Reeturn whether a region contains an object.
+    fn contains(&self, object: ObjectReference) -> bool {
+        self.includes_address(object.to_raw_address())
     }
 }
 

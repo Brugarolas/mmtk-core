@@ -72,6 +72,7 @@ impl Defrag {
         user_triggered: bool,
         exhausted_reusable_space: bool,
         full_heap_system_gc: bool,
+        rc_enabled: bool,
         stress_defrag: bool,
     ) {
         let in_defrag = defrag_enabled
@@ -79,9 +80,37 @@ impl Defrag {
                 || (collection_attempts > 1)
                 || !exhausted_reusable_space
                 || stress_defrag
-                || (collect_whole_heap && user_triggered && full_heap_system_gc));
-        info!("Defrag: {}", in_defrag);
-        probe!(mmtk, immix_defrag, in_defrag);
+                || (collect_whole_heap && user_triggered && full_heap_system_gc))
+            && !rc_enabled;
+
+        {
+            // These details are useful for debugging why a debug GC is triggered or not triggered.
+            // We encode those conditions into a bitfield because we can't pass too many args to the
+            // eBPF tracer via the USDT arguments.
+            let decision_word = (defrag_enabled as u32)
+                | (emergency_collection as u32) << 1
+                | (collect_whole_heap as u32) << 2
+                | (user_triggered as u32) << 3
+                | (exhausted_reusable_space as u32) << 4
+                | (full_heap_system_gc as u32) << 5
+                | (stress_defrag as u32) << 6;
+
+            info!(
+                "Defrag: {i}, collection_attempts: {c}, decision_word: 0b{d:b}",
+                i = in_defrag,
+                c = collection_attempts,
+                d = decision_word,
+            );
+
+            probe!(
+                mmtk,
+                immix_defrag,
+                in_defrag,
+                collection_attempts,
+                decision_word
+            );
+        }
+
         self.in_defrag_collection
             .store(in_defrag, Ordering::Release)
     }
@@ -101,16 +130,15 @@ impl Defrag {
     /// Update available_clean_pages_for_defrag counter when a clean block is allocated.
     pub fn notify_new_clean_block(&self, copy: bool) {
         if copy {
+            // `update()` allows infallable atomic update, but is not stablized until 1.95.
+            // Migrate to `update()` after bumping MSRV.
+            #[allow(deprecated)]
             let available_clean_pages_for_defrag =
                 self.available_clean_pages_for_defrag.fetch_update(
                     Ordering::SeqCst,
                     Ordering::SeqCst,
                     |available_clean_pages_for_defrag| {
-                        if available_clean_pages_for_defrag <= Block::PAGES {
-                            Some(0)
-                        } else {
-                            Some(available_clean_pages_for_defrag - Block::PAGES)
-                        }
+                        Some(available_clean_pages_for_defrag.saturating_sub(Block::PAGES))
                     },
                 );
             if available_clean_pages_for_defrag.unwrap() <= Block::PAGES {

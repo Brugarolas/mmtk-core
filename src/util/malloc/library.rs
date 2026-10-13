@@ -26,7 +26,7 @@ pub const BYTES_IN_MALLOC_PAGE: usize = 1 << LOG_BYTES_IN_MALLOC_PAGE;
 
 #[cfg(feature = "malloc_jemalloc")]
 mod jemalloc {
-    // Normal 4K page
+    // OS page
     pub const LOG_BYTES_IN_MALLOC_PAGE: u8 = crate::util::constants::LOG_BYTES_IN_PAGE;
     // Whether this allocator supports arbitrary-alignment allocation.
     // If true, the allocator must provide a function equivalent to
@@ -44,7 +44,7 @@ mod jemalloc {
 
 #[cfg(feature = "malloc_mimalloc")]
 mod mimalloc {
-    // Normal 4K page accounting
+    // OS page accounting
     pub const LOG_BYTES_IN_MALLOC_PAGE: u8 = crate::util::constants::LOG_BYTES_IN_PAGE;
     // Whether this allocator supports arbitrary-alignment allocation.
     // If true, the allocator must provide a function equivalent to
@@ -53,13 +53,13 @@ mod mimalloc {
     // passed to `free`, `realloc`, and `malloc_usable_size`).
     pub const SUPPORT_ALIGNED_MALLOC: bool = true;
     // ANSI C
-    pub use mimalloc_sys::{
+    pub use libmimalloc_sys::{
         mi_calloc as calloc, mi_free as free, mi_malloc as malloc, mi_realloc as realloc,
     };
     // Posix
-    pub use mimalloc_sys::mi_posix_memalign as posix_memalign;
+    pub use libmimalloc_sys::mi_posix_memalign as posix_memalign;
     // GNU
-    pub use mimalloc_sys::mi_malloc_usable_size as malloc_usable_size;
+    pub use libmimalloc_sys::mi_usable_size as malloc_usable_size;
 }
 
 /// If no malloc lib is specified, use the libc implementation
@@ -68,7 +68,7 @@ mod mimalloc {
     not(any(feature = "malloc_jemalloc", feature = "malloc_mimalloc"))
 ))]
 mod libc_malloc {
-    // Normal 4K page
+    // OS page
     pub const LOG_BYTES_IN_MALLOC_PAGE: u8 = crate::util::constants::LOG_BYTES_IN_PAGE;
     // Whether this allocator supports arbitrary-alignment allocation.
     // If true, the allocator must provide a function equivalent to

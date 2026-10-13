@@ -37,12 +37,18 @@ pub fn allocate_max_size_object() {
     with_mockvm(
         default_setup,
         || {
-            let (size, align) = (usize::MAX, 8);
+            use crate::util::constants::BYTES_IN_PAGE;
+
+            let align = 8;
+            // Maximum size we allow for allocation is usize::MAX - BYTES_IN_PAGE aligned down to
+            // page size. This will panic with an 'attempt to add with overflow' otherwise.
+            let size =
+                crate::util::conversions::raw_align_down(usize::MAX - BYTES_IN_PAGE, BYTES_IN_PAGE);
 
             MUTATOR.with_fixture_mut(|fixture| {
                 alloc_default_or_large(
                     fixture.mmtk(),
-                    &mut fixture.mutator,
+                    fixture.mutator(),
                     size,
                     align,
                     0,
@@ -68,7 +74,7 @@ pub fn allocate_max_size_object_after_succeed() {
                 // Allocate something so we have a thread local allocation buffer
                 alloc_default_or_large(
                     fixture.mmtk(),
-                    &mut fixture.mutator,
+                    fixture.mutator(),
                     8,
                     8,
                     0,
@@ -77,7 +83,7 @@ pub fn allocate_max_size_object_after_succeed() {
                 // Allocate an unrealistically large object
                 alloc_default_or_large(
                     fixture.mmtk(),
-                    &mut fixture.mutator,
+                    fixture.mutator(),
                     usize::MAX,
                     8,
                     0,
@@ -105,7 +111,7 @@ pub fn allocate_unrealistically_large_object() {
             MUTATOR.with_fixture_mut(|fixture| {
                 alloc_default_or_large(
                     fixture.mmtk(),
-                    &mut fixture.mutator,
+                    fixture.mutator(),
                     size,
                     align,
                     0,
@@ -127,7 +133,7 @@ pub fn allocate_more_than_heap_size() {
             MUTATOR.with_fixture_mut(|fixture| {
                 alloc_default_or_large(
                     fixture.mmtk(),
-                    &mut fixture.mutator,
+                    fixture.mutator(),
                     2 * 1024 * 1024,
                     8,
                     0,

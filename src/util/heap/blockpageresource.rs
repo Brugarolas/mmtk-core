@@ -239,6 +239,8 @@ impl<B: Region> BlockQueue<B> {
 
     /// Atomically pop an element from the array.
     fn pop(&self) -> Option<B> {
+        // `try_update()` is not stablized until 1.95.  Migrate to `try_update()` after bumping MSRV.
+        #[allow(deprecated)]
         let i = self
             .cursor
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |i| {
@@ -327,7 +329,7 @@ impl<B: Region> BlockPool<B> {
     /// Push a block to the thread-local queue
     pub fn push(&self, block: B) {
         self.count.fetch_add(1, Ordering::SeqCst);
-        let id = crate::scheduler::current_worker_ordinal();
+        let id = crate::scheduler::current_worker_ordinal().unwrap();
         let failed = unsafe {
             self.worker_local_freed_blocks[id]
                 .push_relaxed(block)

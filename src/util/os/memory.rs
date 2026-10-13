@@ -8,8 +8,65 @@ use crate::{
     vm::VMBinding,
 };
 
+/// Error returned by mmap-related operations in MMTk.
+#[derive(Debug)]
+pub struct MmapError {
+    /// The start address of the mmap operation that failed.
+    pub error_address: Address,
+    /// The size (in bytes) of the mmap operation that failed.
+    pub bytes: usize,
+    /// Human-readable annotation for the mmap operation.
+    ///
+    /// This is derived from [`MmapAnnotation`] at the call site.
+    pub annotation: String,
+    /// The underlying OS I/O error.
+    pub error: std::io::Error,
+}
+
+impl MmapError {
+    /// Create a new [`MmapError`].
+    pub fn new(
+        error_address: Address,
+        bytes: usize,
+        annotation: &MmapAnnotation<'_>,
+        error: std::io::Error,
+    ) -> Self {
+        Self {
+            error_address,
+            bytes,
+            annotation: annotation.to_string(),
+            error,
+        }
+    }
+}
+
+impl std::fmt::Display for MmapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "mmap {} (size {}, annotation {}) failed: {}",
+            self.error_address, self.bytes, self.annotation, self.error
+        )
+    }
+}
+
+impl std::error::Error for MmapError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
+/// Result type for mmap operations that can return [`MmapError`].
+pub type MmapResult<T> = std::result::Result<T, MmapError>;
+
 /// Abstraction for OS memory operations.
 pub trait OSMemory {
+    /// log2 of the page size of the OS. This is the granularity of OS memory operations such as `mprotect`.
+    /// MMTk uses the same page size ([`crate::util::constants::LOG_BYTES_IN_PAGE`]).
+    const LOG_BYTES_IN_PAGE: u8;
+    /// The page size of the OS in bytes.
+    const BYTES_IN_PAGE: usize = 1 << Self::LOG_BYTES_IN_PAGE;
+
     /// Perform a demand-zero mmap.
     ///
     /// Fallback: `annotation` is only used for debugging. For platforms that do not support mmap annotations, this parameter can be ignored.
@@ -19,19 +76,40 @@ pub trait OSMemory {
         size: usize,
         strategy: MmapStrategy,
         annotation: &MmapAnnotation<'_>,
-    ) -> Result<Address>;
+    ) -> MmapResult<Address>;
+
+    /// Perform a no-reserve mmap at any available address, aligned to `align`.
+    ///
+    /// This API is used for reserving address ranges (typically with `PROT_NONE`) before committing.
+    fn dzmmap_anywhere(
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address>;
+
+    /// Perform a mmap with `start` as the preferred address. The OS may return a different address.
+    /// The returned range is aligned to `align`.
+    fn dzmmap_preferred(
+        start: Address,
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address>;
 
     /// Handle mmap errors, possibly by signaling the VM about an out-of-memory condition.
-    fn handle_mmap_error<VM: VMBinding>(
-        error: std::io::Error,
-        tls: VMThread,
-        addr: Address,
-        bytes: usize,
-    ) {
+    fn handle_mmap_error<VM: VMBinding>(mmap_error: MmapError, tls: VMThread) {
         use crate::util::alloc::AllocationError;
         use std::io::ErrorKind;
 
-        eprintln!("Failed to mmap {}, size {}", addr, bytes);
+        eprintln!(
+            "Failed to mmap from {} to {} (size {}), annotation {}",
+            mmap_error.error_address,
+            mmap_error.error_address.wrapping_add(mmap_error.bytes),
+            mmap_error.bytes,
+            mmap_error.annotation
+        );
         eprintln!("{}", OS::get_process_memory_maps().unwrap());
 
         let call_binding_oom = || {
@@ -41,7 +119,7 @@ pub trait OSMemory {
             unreachable!()
         };
 
-        match error.kind() {
+        match mmap_error.error.kind() {
             // From Rust nightly 2021-05-12, we started to see Rust added this ErrorKind.
             ErrorKind::OutOfMemory => {
                 call_binding_oom();
@@ -50,7 +128,7 @@ pub trait OSMemory {
             // TODO: We may be able to remove this now.
             ErrorKind::Other => {
                 // further check the error
-                if let Some(os_errno) = error.raw_os_error() {
+                if let Some(os_errno) = mmap_error.error.raw_os_error() {
                     if OS::is_mmap_oom(os_errno) {
                         call_binding_oom();
                     }
@@ -60,14 +138,14 @@ pub trait OSMemory {
                 panic!("Failed to mmap, the address is already mapped. Should MMTk quarantine the address range first?");
             }
             _ => {
-                if let Some(os_errno) = error.raw_os_error() {
+                if let Some(os_errno) = mmap_error.error.raw_os_error() {
                     if OS::is_mmap_oom(os_errno) {
                         call_binding_oom();
                     }
                 }
             }
         }
-        panic!("Unexpected mmap failure: {:?}", error)
+        panic!("Unexpected mmap failure: {:?}", mmap_error.error)
     }
 
     /// Check whether the given OS error number indicates an out-of-memory condition.
@@ -197,6 +275,25 @@ impl MmapStrategy {
         reserve: true,
     };
 
+    /// The strategy for raw memory freelist
+    pub const RAW_MEMORY_FREELIST: Self = Self {
+        huge_page: HugePageSupport::No,
+        prot: MmapProtection::ReadWrite,
+        // Raw memory freelist will mmap the address ranges quarantined for the spaces. So we have to allow replace.
+        replace: true,
+        reserve: true,
+    };
+
+    /// The strategy for quarantining address ranges.
+    pub const QUARANTINE: Self = Self {
+        huge_page: HugePageSupport::No,
+        prot: MmapProtection::NoAccess,
+        // In test mode, we allow replacing existing mappings for quarantine,
+        // so that we can reuse the same address range for multiple test cases.
+        replace: cfg!(test),
+        reserve: false,
+    };
+
     /// The strategy for MMTk's test memory
     #[cfg(test)]
     pub const TEST: Self = Self {
@@ -296,5 +393,17 @@ impl std::fmt::Display for MmapAnnotation<'_> {
             MmapAnnotation::Test { file, line } => write!(f, "mmtk:test:{file}:{line}"),
             MmapAnnotation::Misc { name } => write!(f, "mmtk:misc:{name}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::os::OS;
+
+    #[test]
+    fn os_page_size_matches_system() {
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        assert_eq!(OS::BYTES_IN_PAGE, page_size as usize);
     }
 }

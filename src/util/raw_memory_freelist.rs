@@ -5,7 +5,7 @@ use crate::util::conversions;
 use crate::util::os::*;
 
 /** log2 of the number of bits used by a free list entry (two entries per unit) */
-const LOG_ENTRY_BITS: usize = LOG_BITS_IN_INT as _;
+const LOG_ENTRY_BITS: usize = i32::BITS.ilog2() as _;
 
 /** log2 of the number of bytes used by a free list entry (two entries per unit) */
 const LOG_BYTES_IN_ENTRY: usize = LOG_ENTRY_BITS - (LOG_BITS_IN_BYTE as usize);
@@ -25,6 +25,7 @@ pub struct RawMemoryFreeList {
     current_units: i32,
     pages_per_block: i32,
     strategy: MmapStrategy,
+    slice: &'static mut [i32],
 }
 
 impl FreeList for RawMemoryFreeList {
@@ -35,21 +36,38 @@ impl FreeList for RawMemoryFreeList {
         self.heads
     }
     fn get_entry(&self, index: i32) -> i32 {
-        let offset = (index << LOG_BYTES_IN_ENTRY) as usize;
-        debug_assert!(self.base + offset >= self.base && self.base + offset < self.high_water);
-        unsafe { (self.base + offset).load() }
+        #[cfg(debug_assertions)]
+        {
+            let len = (self.high_water - self.base) >> LOG_BYTES_IN_ENTRY;
+            debug_assert_eq!(
+                len,
+                self.slice.len(),
+                "Length does not match.  \
+                high_water: {h}, base: {b}, computed len: {len}, \
+                slice len: {sl}",
+                h = self.high_water,
+                b = self.base,
+                sl = self.slice.len()
+            );
+        }
+        self.slice[index as usize]
     }
     fn set_entry(&mut self, index: i32, value: i32) {
-        let offset = (index << LOG_BYTES_IN_ENTRY) as usize;
-        debug_assert!(
-            self.base + offset >= self.base && self.base + offset < self.high_water,
-            "base={:?} offset={:?} index={:?} high_water={:?}",
-            self.base,
-            offset,
-            self.base + offset,
-            self.high_water
-        );
-        unsafe { (self.base + offset).store(value) }
+        #[cfg(debug_assertions)]
+        {
+            let len = (self.high_water - self.base) >> LOG_BYTES_IN_ENTRY;
+            debug_assert_eq!(
+                len,
+                self.slice.len(),
+                "Length does not match.  \
+                high_water: {h}, base: {b}, computed len: {len}, \
+                slice len: {sl}",
+                h = self.high_water,
+                b = self.base,
+                sl = self.slice.len()
+            );
+        }
+        self.slice[index as usize] = value;
     }
     fn alloc(&mut self, size: i32) -> i32 {
         if self.current_units == 0 {
@@ -111,6 +129,9 @@ impl RawMemoryFreeList {
             current_units: 0,
             pages_per_block,
             strategy,
+            // SAFETY: when a RawMemoryFreelist is created, its address range is
+            // base..base, a zero-sized slice starting at base
+            slice: unsafe { std::slice::from_raw_parts_mut(base.to_mut_ptr::<i32>(), 0) },
         }
     }
 
@@ -143,6 +164,10 @@ impl RawMemoryFreeList {
             // Allocate more VM from the OS
             self.raise_high_water(blocks);
         }
+
+        let len = (self.high_water - self.base) >> LOG_BYTES_IN_ENTRY;
+        // SAFETY: The memory is mapped and valid after `raise_high_water`.
+        self.slice = unsafe { std::slice::from_raw_parts_mut(self.base.to_mut_ptr::<i32>(), len) };
 
         let old_max = self.current_units;
         assert!(
@@ -206,7 +231,11 @@ impl RawMemoryFreeList {
                 name: "RawMemoryFreeList",
             },
         );
-        assert!(res.is_ok(), "Can't get more space with mmap()");
+        assert!(
+            res.is_ok(),
+            "Failed to mmap memory for RawMemoryFreeList: start = {start}, bytes = {bytes}, strategy = {:?}",
+            self.strategy
+        );
     }
     pub fn get_limit(&self) -> Address {
         self.limit

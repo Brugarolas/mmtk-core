@@ -1,5 +1,5 @@
-// GITHUB-CI: MMTK_PLAN=Immix,GenImmix,StickyImmix,MarkSweep,MarkCompact
-// GITHUB-CI: FEATURES=is_mmtk_object
+// GITHUB-CI: MMTK_PLAN=Immix,GenImmix,StickyImmix,MarkSweep,Lisp2
+// GITHUB-CI: FEATURES=vo_bit
 
 // Only test this with plans that use LOS. NoGC does not use large object space.
 
@@ -21,10 +21,10 @@ pub fn interior_pointer_in_large_object_same_page() {
             }
         },
         || {
-            let mut fixture = MutatorFixture::create_with_heapsize(10 * MB);
+            let fixture = MutatorFixture::create_with_heapsize(10 * MB);
 
             let addr = memory_manager::alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 OBJECT_SIZE,
                 8,
                 0,
@@ -41,7 +41,7 @@ pub fn interior_pointer_in_large_object_same_page() {
             );
 
             memory_manager::post_alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 obj,
                 OBJECT_SIZE,
                 AllocationSemantics::Los,

@@ -1,14 +1,17 @@
 use criterion::Criterion;
 
-#[cfg(feature = "is_mmtk_object")]
+#[cfg(feature = "vo_bit")]
+use mmtk::memory_manager;
+#[cfg(feature = "vo_bit")]
 use mmtk::util::test_util::fixtures::*;
-use mmtk::util::test_util::mock_method::*;
-use mmtk::util::test_util::mock_vm::{write_mockvm, MockVM};
+use mmtk::util::test_util::mock_vm::*;
 
 pub fn bench(c: &mut Criterion) {
-    // Setting a larger heap, although the GC should be disabled in the MockVM
-    #[cfg(feature = "is_mmtk_object")]
-    let mut fixture = MutatorFixture::create_with_heapsize(1 << 30);
+    // Setting a larger heap, although the GC should be disabled below
+    #[cfg(feature = "vo_bit")]
+    let fixture = MutatorFixture::create_with_heapsize(1 << 30);
+    #[cfg(feature = "vo_bit")]
+    memory_manager::disable_collection(fixture.mmtk()).unwrap();
 
     // Normal objects
     // 16KB object -- we want to make sure the object can fit into any normal space (e.g. immix space or mark sweep space)
@@ -16,18 +19,17 @@ pub fn bench(c: &mut Criterion) {
     write_mockvm(|mock| {
         *mock = MockVM {
             get_object_size: MockMethod::new_fixed(Box::new(|_| NORMAL_OBJECT_SIZE)),
-            is_collection_enabled: MockMethod::new_fixed(Box::new(|_| false)),
             ..MockVM::default()
         }
     });
 
     c.bench_function("internal pointer - normal objects", |_b| {
-        #[cfg(feature = "is_mmtk_object")]
+        #[cfg(feature = "vo_bit")]
         {
             use mmtk::memory_manager;
             use mmtk::AllocationSemantics;
             let addr = memory_manager::alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 NORMAL_OBJECT_SIZE,
                 8,
                 0,
@@ -35,7 +37,7 @@ pub fn bench(c: &mut Criterion) {
             );
             let obj_ref = MockVM::object_start_to_ref(addr);
             memory_manager::post_alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 obj_ref,
                 NORMAL_OBJECT_SIZE,
                 AllocationSemantics::Default,
@@ -45,8 +47,8 @@ pub fn bench(c: &mut Criterion) {
                 memory_manager::find_object_from_internal_pointer(obj_end - 1, NORMAL_OBJECT_SIZE);
             })
         }
-        #[cfg(not(feature = "is_mmtk_object"))]
-        panic!("The benchmark requires is_mmtk_object feature to run");
+        #[cfg(not(feature = "vo_bit"))]
+        panic!("The benchmark requires vo_bit feature to run");
     });
 
     // Large objects
@@ -55,17 +57,16 @@ pub fn bench(c: &mut Criterion) {
     write_mockvm(|mock| {
         *mock = MockVM {
             get_object_size: MockMethod::new_fixed(Box::new(|_| LARGE_OBJECT_SIZE)),
-            is_collection_enabled: MockMethod::new_fixed(Box::new(|_| false)),
             ..MockVM::default()
         }
     });
     c.bench_function("internal pointer - large objects", |_b| {
-        #[cfg(feature = "is_mmtk_object")]
+        #[cfg(feature = "vo_bit")]
         {
             use mmtk::memory_manager;
             use mmtk::AllocationSemantics;
             let addr = memory_manager::alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 LARGE_OBJECT_SIZE,
                 8,
                 0,
@@ -73,7 +74,7 @@ pub fn bench(c: &mut Criterion) {
             );
             let obj_ref = MockVM::object_start_to_ref(addr);
             memory_manager::post_alloc(
-                &mut fixture.mutator,
+                fixture.mutator(),
                 obj_ref,
                 LARGE_OBJECT_SIZE,
                 AllocationSemantics::Los,
@@ -83,7 +84,7 @@ pub fn bench(c: &mut Criterion) {
                 memory_manager::find_object_from_internal_pointer(obj_end - 1, LARGE_OBJECT_SIZE);
             })
         }
-        #[cfg(not(feature = "is_mmtk_object"))]
-        panic!("The benchmark requires is_mmtk_object feature to run");
+        #[cfg(not(feature = "vo_bit"))]
+        panic!("The benchmark requires vo_bit feature to run");
     });
 }

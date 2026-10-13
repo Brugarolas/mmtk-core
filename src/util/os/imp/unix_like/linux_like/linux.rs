@@ -9,13 +9,34 @@ use std::io::Result;
 pub struct Linux;
 
 impl OSMemory for Linux {
+    const LOG_BYTES_IN_PAGE: u8 = 12;
+
     fn dzmmap(
         start: Address,
         size: usize,
         strategy: MmapStrategy,
         annotation: &MmapAnnotation<'_>,
-    ) -> Result<Address> {
+    ) -> MmapResult<Address> {
         linux_common::dzmmap(start, size, strategy, annotation)
+    }
+
+    fn dzmmap_anywhere(
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address> {
+        linux_common::dzmmap_anywhere(size, align, strategy, annotation)
+    }
+
+    fn dzmmap_preferred(
+        start: Address,
+        size: usize,
+        align: usize,
+        strategy: MmapStrategy,
+        annotation: &MmapAnnotation<'_>,
+    ) -> MmapResult<Address> {
+        linux_common::dzmmap_preferred(start, size, align, strategy, annotation)
     }
 
     fn munmap(start: Address, size: usize) -> Result<()> {

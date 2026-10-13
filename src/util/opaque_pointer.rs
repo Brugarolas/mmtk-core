@@ -5,7 +5,7 @@ use libc::c_void;
 /// For example, a pointer to the thread or the thread local storage is an opaque pointer for MMTK.
 /// The type does not provide any method for dereferencing.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct OpaquePointer(*mut c_void);
 
 // We never really dereference an opaque pointer in mmtk-core.
@@ -27,6 +27,16 @@ impl OpaquePointer {
         OpaquePointer(addr.to_mut_ptr::<c_void>())
     }
 
+    /// Cast a raw mutable pointer to an [`OpaquePointer`].
+    pub fn from_mut_ptr<T>(ptr: *mut T) -> Self {
+        OpaquePointer(ptr as *mut c_void)
+    }
+
+    /// Cast the opaque pointer to a raw mutable pointer.
+    pub fn as_mut_ptr<T>(self) -> *mut T {
+        self.0 as *mut T
+    }
+
     /// Cast the opaque pointer to an [`Address`] type.
     pub fn to_address(self) -> Address {
         Address::from_mut_ptr(self.0)
@@ -44,7 +54,7 @@ impl OpaquePointer {
 /// so the VM knows the context.
 /// A VMThread may be a VMMutatorThread, a VMWorkerThread, or any VMThread.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct VMThread(pub OpaquePointer);
 
 impl VMThread {
@@ -56,12 +66,12 @@ impl VMThread {
 /// When a VMMutatorThread is used as an argument or a field of a type, it generally means
 /// the function or the functions for the type is executed in the context of the mutator thread.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct VMMutatorThread(pub VMThread);
 
 /// A VMWorkerThread is a VMThread that is associates with a [`crate::scheduler::GCWorker`].
 /// When a VMWorkerThread is used as an argument or a field of a type, it generally means
 /// the function or the functions for the type is executed in the context of the mutator thread.
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct VMWorkerThread(pub VMThread);

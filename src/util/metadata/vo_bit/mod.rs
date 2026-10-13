@@ -41,7 +41,7 @@
 //! [`crate::plan::PlanConstraints::may_trace_duplicate_edges`])*
 
 // FIXME: The entire vo_bit module should only be available if the "vo_bit" feature is enabled.
-// However, the malloc-based MarkSweepSpace and MarkCompactSpace depends on the VO bits regardless
+// However, the malloc-based MarkSweepSpace and Lisp2Space depends on the VO bits regardless
 // of the "vo_bit" feature.
 #[cfg(feature = "vo_bit")]
 pub(crate) mod helper;
@@ -70,7 +70,9 @@ cfg_if::cfg_if! {
 
 /// The base address for VO bit side metadata on 64 bits platforms.
 #[cfg(target_pointer_width = "64")]
-pub const VO_BIT_SIDE_METADATA_ADDR: Address = VO_BIT_SIDE_METADATA_SPEC.get_absolute_offset();
+pub fn vo_bit_side_metadata_addr() -> Address {
+    VO_BIT_SIDE_METADATA_SPEC.get_starting_address()
+}
 
 /// Atomically set the VO bit for an object.
 pub(crate) fn set_vo_bit(object: ObjectReference) {
@@ -186,7 +188,7 @@ pub(crate) fn find_object_from_internal_pointer<VM: VMBinding>(
     start: Address,
     search_limit_bytes: usize,
 ) -> Option<ObjectReference> {
-    if !start.is_mapped() {
+    if !VO_BIT_SIDE_METADATA_SPEC.is_mapped(start) {
         return None;
     }
 

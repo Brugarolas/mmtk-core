@@ -1,8 +1,8 @@
-// GITHUB-CI: MMTK_PLAN=NoGC,MarkSweep,MarkCompact,SemiSpace,Immix
+// GITHUB-CI: MMTK_PLAN=NoGC,MarkSweep,Lisp2,SemiSpace,Immix
 // GITHUB-CI: FEATURES=vo_bit
 
 // Note on the plans chosen for CI:
-// - Those plans cover the MarkSweepSpace, MarkCompactSpace, CopySpace and ImmixSpace.
+// - Those plans cover the MarkSweepSpace, Lisp2Space, CopySpace and ImmixSpace.
 //   Each plan other than NoGC also include ImmortalSpace and LOS.
 // - PageProtect consumes too much memory and the test will fail with the default heap size
 //   chosen by the MutatorFixture.
@@ -37,7 +37,7 @@ pub fn test_heap_traversal() {
                 let traversal0 = get_all_objects(mmtk);
                 assert!(traversal0.is_empty());
 
-                let mutator = &mut fixture.mutator;
+                let mutator = fixture.mutator();
 
                 let align = BYTES_IN_WORD;
 

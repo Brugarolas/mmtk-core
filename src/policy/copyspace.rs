@@ -1,4 +1,4 @@
-use crate::plan::{ObjectQueue, VectorObjectQueue};
+use crate::plan::tracing::{ObjectQueue, OptionObjectQueue};
 use crate::policy::copy_context::PolicyCopyContext;
 use crate::policy::gc_work::TRACE_KIND_TRANSITIVE_PIN;
 use crate::policy::sft::GCWorkerMutRef;
@@ -57,7 +57,7 @@ impl<VM: VMBinding> SFT for CopySpace<VM> {
         !self.is_from_space()
     }
 
-    fn initialize_object_metadata(&self, _object: ObjectReference) {
+    fn initialize_object_metadata(&self, _object: ObjectReference, _bytes: usize) {
         #[cfg(feature = "vo_bit")]
         crate::util::metadata::vo_bit::set_vo_bit(_object);
     }
@@ -74,12 +74,12 @@ impl<VM: VMBinding> SFT for CopySpace<VM> {
         }
     }
 
-    #[cfg(feature = "is_mmtk_object")]
+    #[cfg(feature = "vo_bit")]
     fn is_mmtk_object(&self, addr: Address) -> Option<ObjectReference> {
         crate::util::metadata::vo_bit::is_vo_bit_set_for_addr(addr)
     }
 
-    #[cfg(feature = "is_mmtk_object")]
+    #[cfg(feature = "vo_bit")]
     fn find_object_from_internal_pointer(
         &self,
         ptr: Address,
@@ -93,7 +93,7 @@ impl<VM: VMBinding> SFT for CopySpace<VM> {
 
     fn sft_trace_object(
         &self,
-        queue: &mut VectorObjectQueue,
+        queue: &mut OptionObjectQueue,
         object: ObjectReference,
         worker: GCWorkerMutRef,
     ) -> ObjectReference {
